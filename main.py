@@ -2,13 +2,23 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import local_session, engine
-from models import Task, CreateTask, base
+from models import Task, CreateTask,TaskResponse, base
 import uuid
 
 app = FastAPI(
     title="Task Manager API",
     description="",
     docs_url="/",
+)
+
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"], 
+    allow_headers=["*"],  
 )
 
 base.metadata.create_all(bind=engine)
@@ -21,10 +31,9 @@ def get_database():
 def no_task_exception():
     raise HTTPException(status_code=404, detail="No such task in the list.")
 
-@app.post("/tasks", response_model=CreateTask)
+@app.post("/tasks", response_model=TaskResponse)
 def create_task(task_data: CreateTask, db: Session = Depends(get_database)):
-    task_id = uuid.uuid4()  
-    new_task = Task(id=str(task_id), title=task_data.title, description=task_data.description) 
+    new_task = Task(title=task_data.title, description=task_data.description) 
     db.add(new_task)
     db.commit()
     db.refresh(new_task)

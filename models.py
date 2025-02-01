@@ -12,3 +12,8 @@ class Task(base):
 class CreateTask(BaseModel): 
     title: str
     description: str
+    
+class TaskResponse(BaseModel):
+    id: str
+    title: str
+    description: str
