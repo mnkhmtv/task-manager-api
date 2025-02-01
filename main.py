@@ -1,5 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from database import local_session, engine
+from models import Task, CreateTask, base
 import uuid
 
 app = FastAPI(
@@ -7,43 +10,53 @@ app = FastAPI(
     description="",
     docs_url="/",
 )
-tasks = {}
 
-class CreateTask(BaseModel):
-    title: str
-    description: str
+base.metadata.create_all(bind=engine)
 
-class Task(CreateTask):
-    id: uuid.UUID
+def get_database():
+    db = local_session()
+    try: yield db
+    finally: db.close()
 
-@app.post("/tasks", response_model=Task)
-def create_task(task: CreateTask):
+def no_task_exception():
+    raise HTTPException(status_code=404, detail="No such task in the list.")
+
+@app.post("/tasks", response_model=CreateTask)
+def create_task(task_data: CreateTask, db: Session = Depends(get_database)):
     task_id = uuid.uuid4()  
-    new_task = Task(id=task_id, **task.model_dump()) 
-    tasks[str(task_id)] = new_task
+    new_task = Task(id=str(task_id), title=task_data.title, description=task_data.description) 
+    db.add(new_task)
+    db.commit()
+    db.refresh(new_task)
     return new_task
 
-@app.get("/tasks", response_model=list[Task])
-def get_tasks():
-    return list(tasks.values())
+@app.get("/tasks", response_model=list[CreateTask])
+def get_tasks(db: Session = Depends(get_database)):
+    return db.query(Task).all()
 
-@app.get("/tasks/{task_id}", response_model=Task)
-def get_task(task_id: str):
-    if task_id in tasks:
-        return tasks[task_id]
-    raise HTTPException(status_code=404, detail="No such task in the list.")
+@app.get("/tasks/{task_id}", response_model=CreateTask)
+def get_task(task_id: str, db: Session = Depends(get_database)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        no_task_exception()
+    return task
 
-@app.put("/tasks/{task_id}", response_model=Task)
-def update_task(task_id: str, task_update: CreateTask):
-    if task_id in tasks:
-        updated_task = Task(id=uuid.UUID(task_id), **task_update.model_dump())
-        tasks[task_id] = updated_task
-        return updated_task
-    raise HTTPException(status_code=404, detail="No such task in the list.")
+@app.put("/tasks/{task_id}", response_model=CreateTask)
+def update_task(task_id: str, task_data: CreateTask, db: Session = Depends(get_database)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        no_task_exception()
+    task.title = task_data.title
+    task.description = task_data.description
+    db.commit()
+    db.refresh(task)
+    return task
 
 @app.delete("/tasks/{task_id}")
-def delete_task(task_id: str):
-    if task_id in tasks:
-        del tasks[task_id]
-        return {"message": "Task has been deleted"} 
-    raise HTTPException(status_code=404, detail="No such task in the list.")
+def delete_task(task_id: str, db: Session = Depends(get_database)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        no_task_exception()
+    db.delete(task)
+    db.commit()
+    return {"message": "Task has been deleted"} 
